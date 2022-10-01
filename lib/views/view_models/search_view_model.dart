@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:user_tag_demo/models/user.dart';
 
+///Search view model
+final searchViewModel = SearchViewModel();
+
 class SearchViewModel {
   late final ValueNotifier<List<User>> _users = ValueNotifier([]);
   ValueNotifier<List<User>> get users => _users;

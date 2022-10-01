@@ -1,44 +1,65 @@
 import 'package:flutter/material.dart';
 import 'package:user_tag_demo/models/tagged_text.dart';
 import 'package:user_tag_demo/models/trie.dart';
-import 'package:user_tag_demo/models/user.dart';
-import 'package:user_tag_demo/views/view_models/search_view_model.dart';
-import 'package:user_tag_demo/views/widgets/loading_indicator.dart';
 
 typedef UserTaggerWidgetBuilder = Widget Function(
-    BuildContext context, GlobalKey key);
+  BuildContext context,
+  GlobalKey key,
+);
 typedef TagTextFormatter = String Function(String id, String name);
-
-///Search view model
-final _searchViewModel = SearchViewModel();
 
 class UserTagger extends StatefulWidget {
   const UserTagger({
     Key? key,
-    required this.controller,
-    required this.onFormattedTextChanged,
+    required this.overlay,
+    required this.textEditingController,
+    required this.onSearch,
     required this.builder,
+    this.padding = EdgeInsets.zero,
+    this.overlayHeight = 380,
+    this.onFormattedTextChanged,
     this.tagController,
     this.tagTextFormatter,
-    this.onCreate,
   }) : super(key: key);
 
+  ///Widget shown in an overlay when search context is entered.
+  final Widget overlay;
+
+  ///Padding applied to [overlay].
+  final EdgeInsetsGeometry padding;
+
+  ///[overlay]'s height.
+  final double overlayHeight;
+
+  ///Formats and replaces tagged user names.
+  ///By default, tagged user names are replaced in this format:
+  ///```dart
+  ///"@Lucky Ebere"
+  ///```
+  ///becomes
+  ///
+  ///```dart
+  ///"@6zo22531b866ce0016f9e5tt#Lucky Ebere#"
+  ///```
+  ///assuming that `Lucky Ebere`'s id is `6zo22531b866ce0016f9e5tt`.
+  ///
+  ///Specify this parameter to use a different format.
   final TagTextFormatter? tagTextFormatter;
 
   /// {@macro usertagger}
   final UserTagController? tagController;
 
-  ///Child TextField's controller
-  final TextEditingController controller;
+  ///Child TextField's controller.
+  final TextEditingController textEditingController;
 
-  ///Callback to dispatch updated formatted text
-  final void Function(String) onFormattedTextChanged;
+  ///Callback to dispatch updated formatted text.
+  final void Function(String)? onFormattedTextChanged;
 
-  ///Returns callback that can be used to dismiss the overlay
-  ///from parent widget.
-  final void Function(VoidCallback)? onCreate;
+  ///Triggered with the search query whenever [UserTagger]
+  ///enters the search context.
+  final void Function(String) onSearch;
 
-  ///Overlay Widget builder.
+  ///Parent wrapper widget builder.
   ///Returned widget should have a Container as parent widget
   ///with the [GlobalKey] as its key.
   final UserTaggerWidgetBuilder builder;
@@ -48,10 +69,11 @@ class UserTagger extends StatefulWidget {
 }
 
 class _UserTaggerState extends State<UserTagger> {
-  TextEditingController get controller => widget.controller;
-  late final _containerKey = GlobalKey(
+  TextEditingController get controller => widget.textEditingController;
+  late final _parentContainerKey = GlobalKey(
     debugLabel: "TextField Container Key",
   );
+
   late Offset _offset = Offset.zero;
   late double _width = 0;
   late bool _hideOverlay = true;
@@ -62,12 +84,18 @@ class _UserTaggerState extends State<UserTagger> {
     return widget.tagTextFormatter?.call(id, name) ?? "@$id#$name#";
   }
 
+  ///Updates formatted text
+  void _onFormattedTextChanged() {
+    widget.tagController?._onTextChanged(_formattedText);
+    widget.onFormattedTextChanged?.call(_formattedText);
+  }
+
   ///Retrieves rendering information necessary to determine where
   ///the overlay is positioned on the screen.
   void _computeSize() {
     try {
       final renderBox =
-          _containerKey.currentContext!.findRenderObject() as RenderBox;
+          _parentContainerKey.currentContext!.findRenderObject() as RenderBox;
       _width = renderBox.size.width;
       _offset = renderBox.localToGlobal(Offset.zero);
     } catch (e) {
@@ -102,23 +130,22 @@ class _UserTaggerState extends State<UserTagger> {
       builder: (_) => Positioned(
         left: _offset.dx,
         width: _width,
-        height: 380,
-        top: _offset.dy - 390,
-        child: _UserListView(
-          tagUser: _tagUser,
-          onClose: () => _shouldHideOverlay(true),
-        ),
+        height: widget.overlayHeight,
+        top: _offset.dy - (widget.overlayHeight + widget.padding.vertical),
+        child: widget.overlay,
       ),
     );
   }
 
+  ///Custom trie to hold all tagged usernames.
+  ///This is quite useful for doing a precise position-based tag search.
   late final Trie _tagTrie = Trie();
 
   ///Table of tagged user names and their ids
   late final Map<TaggedText, String> _taggedUsers = {};
 
   ///Formatted text where tagged user names are replaced with
-  ///the result of [TagTextFormatter] if it's not null.
+  ///the result of calling [TagTextFormatter] if it's not null.
   ///Otherwise, tagged user names are replaced in this format:
   ///```dart
   ///"@Lucky Ebere"
@@ -149,7 +176,6 @@ class _UserTaggerState extends State<UserTagger> {
         if (i + 1 < splitText.length) {
           end = start + splitText[i + 1].length;
         }
-
         result.add(text);
         continue;
       }
@@ -159,7 +185,7 @@ class _UserTaggerState extends State<UserTagger> {
         String formattedTagText = taggedText.text.replaceAll("@", "");
         formattedTagText =
             _formatTagText(_taggedUsers[taggedText]!, formattedTagText);
-        // formattedTagText = "@${_taggedUsers[taggedText]}#$formattedTagText#";
+
         start = end + 1;
         if (i + 1 < splitText.length) {
           end = start + splitText[i + 1].length;
@@ -175,7 +201,6 @@ class _UserTaggerState extends State<UserTagger> {
     }
 
     final resultString = result.join(" ");
-    print(resultString);
 
     return resultString;
   }
@@ -186,17 +211,9 @@ class _UserTaggerState extends State<UserTagger> {
   ///Current tagged user selected in TextField
   TaggedText? _selectedTag;
 
-  ///Executes user search with [query]
-  void _search(String query) {
-    if (query.isEmpty) return;
-
-    _shouldHideOverlay(false);
-    _searchViewModel.search(query.trim());
-  }
-
   ///Adds [name] and [id] to [_taggedUsers] and
   ///updates content of TextField with [name]
-  void _tagUser(String name, String id) {
+  void _tagUser(String id, String name) {
     _shouldSearch = false;
     _shouldHideOverlay(true);
 
@@ -234,7 +251,6 @@ class _UserTaggerState extends State<UserTagger> {
         endIndex: offset,
         text: name,
       );
-      print(taggedText);
       _taggedUsers[taggedText] = id;
       _tagTrie.insert(taggedText);
 
@@ -244,7 +260,7 @@ class _UserTaggerState extends State<UserTagger> {
         ),
       );
 
-      widget.onFormattedTextChanged(_formattedText);
+      _onFormattedTextChanged();
     }
   }
 
@@ -362,7 +378,7 @@ class _UserTaggerState extends State<UserTagger> {
     _startOffset = null;
     _endOffset = null;
     _isTagSelected = false;
-    widget.onFormattedTextChanged(_formattedText);
+    _onFormattedTextChanged();
   }
 
   ///Whether a tagged user is selected in the TextField
@@ -487,30 +503,6 @@ class _UserTaggerState extends State<UserTagger> {
         );
         return;
       }
-      // if (tag.text.contains(temp)) {
-      //   print("CURRENT CURSOR: $length");
-      //   print("TEMP: $temp -> TAG: ${tag.text}");
-      //   print("START INDEX: ${tag.startIndex} -> END INDEX: ${tag.endIndex}");
-      //   final names = tag.text.split(" ");
-      //   if (names.length != 2) return;
-
-      //   int offset = length +
-      //       names.last.length +
-      //       (names.first.length - temp.length + 1) +
-      //       1;
-
-      //   if (offset > text.length) {
-      //     offset = text.length;
-      //   }
-
-      //   if (text.substring(length + 1, offset).trim().contains(names.last)) {
-      //     _defer = true;
-      //     controller.selection = TextSelection.fromPosition(
-      //       TextPosition(offset: offset),
-      //     );
-      //     return;
-      //   }
-      // }
     }
   }
 
@@ -524,26 +516,24 @@ class _UserTaggerState extends State<UserTagger> {
   ///Exits search context and hides overlay when a terminating character
   ///not matched by [_regExp] is entered.
   void _tagListener() {
-    print(controller.selection.base.offset);
     final currentCursorPosition = controller.selection.base.offset;
+    final text = controller.text;
+
     if (_shouldSearch &&
         _isBacktrackingToSearch &&
-        (_lastCursorPosition - 1 != currentCursorPosition ||
+        ((text.trim().length < _lastCachedText.trim().length &&
+                _lastCursorPosition - 1 != currentCursorPosition) ||
             _lastCursorPosition + 1 != currentCursorPosition)) {
       _shouldSearch = false;
       _isBacktrackingToSearch = false;
       _shouldHideOverlay(true);
     }
-    // if (currentCursorPosition == _lastCursorPosition + 1) {
-    //   _shouldSearch = true;
-    // }
+
     _lastCursorPosition = currentCursorPosition;
     if (_defer) {
       _defer = false;
       return;
     }
-
-    final text = controller.text;
 
     if (text.isEmpty && _selectedTag != null) {
       _removeSelection();
@@ -568,27 +558,27 @@ class _UserTaggerState extends State<UserTagger> {
 
     if (_lastCachedText == text) {
       _shiftCursorForTaggedUser();
-      widget.onFormattedTextChanged(_formattedText);
+      _onFormattedTextChanged();
       return;
     }
 
     if (_lastCachedText.trim().length > text.trim().length) {
       if (_removeEditedTags()) {
         _shouldHideOverlay(true);
-        widget.onFormattedTextChanged(_formattedText);
+        _onFormattedTextChanged();
         return;
       }
       _shiftCursorForTaggedUser();
       final hideOverlay = _backtrackAndSearch();
       if (hideOverlay) _shouldHideOverlay(true);
-      widget.onFormattedTextChanged(_formattedText);
+      _onFormattedTextChanged();
       return;
     }
     _lastCachedText = text;
 
     if (text[position] == "@") {
       _shouldSearch = true;
-      widget.onFormattedTextChanged(_formattedText);
+      _onFormattedTextChanged();
       return;
     }
 
@@ -601,11 +591,11 @@ class _UserTaggerState extends State<UserTagger> {
     } else {
       _shouldHideOverlay(true);
     }
-    widget.onFormattedTextChanged(_formattedText);
+    _onFormattedTextChanged();
   }
 
-  ///Extract text appended to the last `@` symbol found in [text]
-  ///or the substring of [text] up until [position] if [position] is not null
+  ///Extract text appended to the last `@` symbol found
+  ///in the substring of [text] up until [endOffset]
   ///and performs a user search.
   void _extractAndSearch(String text, int endOffset) {
     try {
@@ -617,7 +607,10 @@ class _UserTaggerState extends State<UserTagger> {
         index + 1,
         endOffset + 1,
       );
-      if (userName.isNotEmpty) _search(userName);
+      if (userName.isNotEmpty) {
+        _shouldHideOverlay(false);
+        widget.onSearch(userName);
+      }
     } catch (e, trace) {
       debugPrint("$trace");
     }
@@ -635,6 +628,7 @@ class _UserTaggerState extends State<UserTagger> {
     widget.tagController?._onDismissOverlay(() {
       _shouldHideOverlay(true);
     });
+    widget.tagController?._registerTagUserCallback(_tagUser);
   }
 
   @override
@@ -646,93 +640,7 @@ class _UserTaggerState extends State<UserTagger> {
 
   @override
   Widget build(BuildContext context) {
-    widget.onCreate?.call(() {
-      _shouldHideOverlay(true);
-    });
-    return widget.builder(context, _containerKey);
-  }
-}
-
-class _UserListView extends StatelessWidget {
-  final Function(String, String) tagUser;
-  final VoidCallback onClose;
-  const _UserListView({
-    Key? key,
-    required this.tagUser,
-    required this.onClose,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(.2),
-            offset: const Offset(0, -5),
-            blurRadius: 10,
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: ValueListenableBuilder<bool>(
-            valueListenable: _searchViewModel.loading,
-            builder: (_, loading, __) {
-              return ValueListenableBuilder<List<User>>(
-                  valueListenable: _searchViewModel.users,
-                  builder: (_, users, __) {
-                    if (loading && users.isEmpty) {
-                      return const Center(
-                        child: LoadingWidget(),
-                      );
-                    }
-                    return Column(
-                      children: [
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: IconButton(
-                            onPressed: onClose,
-                            icon: const Icon(Icons.close),
-                          ),
-                        ),
-                        if (users.isEmpty)
-                          const Center(child: Text("No user found"))
-                        else
-                          Expanded(
-                            child: ListView.builder(
-                              padding: EdgeInsets.zero,
-                              itemCount: users.length,
-                              itemBuilder: (_, index) {
-                                final user = users[index];
-                                return ListTile(
-                                  leading: Container(
-                                    height: 50,
-                                    width: 50,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      image: DecorationImage(
-                                        image: NetworkImage(user.avatar),
-                                      ),
-                                    ),
-                                  ),
-                                  title: Text(user.fullName),
-                                  subtitle: Text("@${user.userName}"),
-                                  onTap: () {
-                                    tagUser(user.userName, user.id);
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                      ],
-                    );
-                  });
-            }),
-      ),
-    );
+    return widget.builder(context, _parentContainerKey);
   }
 }
 
@@ -744,6 +652,8 @@ class _UserListView extends StatelessWidget {
 class UserTagController {
   Function? _clearCallback;
   Function? _dismissOverlayCallback;
+  Function(String id, String name)? _tagUserCallback;
+
   late String _text = "";
 
   ///Formatted text from [UserTagger]
@@ -757,6 +667,11 @@ class UserTagController {
   ///Dismisses user list overlay
   void dismissOverlay() {
     _dismissOverlayCallback?.call();
+  }
+
+  ///Tags a user
+  void tagUser({required String id, required String name}) {
+    _tagUserCallback?.call(id, name);
   }
 
   ///Registers callback for clearing [UserTagger]'s
@@ -775,5 +690,10 @@ class UserTagController {
   ///formatted text from [UserTagger].
   void _onTextChanged(String newText) {
     _text = newText;
+  }
+
+  ///Registers callback for tagging a user
+  void _registerTagUserCallback(Function(String id, String name) callback) {
+    _tagUserCallback = callback;
   }
 }

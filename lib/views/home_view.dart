@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:user_tag_demo/models/post.dart';
 import 'package:user_tag_demo/views/view_models/home_view_model.dart';
+import 'package:user_tag_demo/views/view_models/search_view_model.dart';
 import 'package:user_tag_demo/views/widgets/comment_text_field.dart';
 import 'package:user_tag_demo/views/widgets/post_widget.dart';
+import 'package:user_tag_demo/views/widgets/user_list_view.dart';
 import 'package:user_tag_demo/views/widgets/user_tagger_widget.dart';
 
 class HomeView extends StatefulWidget {
@@ -16,13 +18,11 @@ class _HomeViewState extends State<HomeView> {
   late final homeViewModel = HomeViewModel();
   late final _controller = TextEditingController();
   late final _focusNode = FocusNode();
-
-  String _formattedText = "";
-  VoidCallback? _dismissOverlay;
+  late final _tagController = UserTagController();
 
   void _focusListener() {
     if (!_focusNode.hasFocus) {
-      _dismissOverlay?.call();
+      _tagController.dismissOverlay();
     }
   }
 
@@ -45,7 +45,7 @@ class _HomeViewState extends State<HomeView> {
     var insets = MediaQuery.of(context).viewInsets;
     return GestureDetector(
       onTap: () {
-        _dismissOverlay?.call();
+        _tagController.dismissOverlay();
       },
       child: Scaffold(
         appBar: AppBar(
@@ -53,26 +53,26 @@ class _HomeViewState extends State<HomeView> {
           title: const Text("The Squad"),
         ),
         bottomNavigationBar: UserTagger(
-            onCreate: (onClose) {
-              _dismissOverlay = onClose;
-            },
-            onFormattedTextChanged: (formattedText) {
-              _formattedText = formattedText;
-            },
-            controller: _controller,
-            builder: (context, containerKey) {
-              return CommentTextField(
-                focusNode: _focusNode,
-                containerKey: containerKey,
-                insets: insets,
-                controller: _controller,
-                onSend: () {
-                  FocusScope.of(context).unfocus();
-                  homeViewModel.addPost(_formattedText);
-                  _controller.clear();
-                },
-              );
-            }),
+          tagController: _tagController,
+          textEditingController: _controller,
+          onSearch: (query) {
+            searchViewModel.search(query);
+          },
+          overlay: UserListView(tagController: _tagController),
+          builder: (context, containerKey) {
+            return CommentTextField(
+              focusNode: _focusNode,
+              containerKey: containerKey,
+              insets: insets,
+              controller: _controller,
+              onSend: () {
+                FocusScope.of(context).unfocus();
+                homeViewModel.addPost(_tagController.text);
+                _tagController.clear();
+              },
+            );
+          },
+        ),
         body: ValueListenableBuilder<List<Post>>(
             valueListenable: homeViewModel.posts,
             builder: (_, posts, __) {
