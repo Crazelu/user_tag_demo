@@ -123,7 +123,7 @@ class _UserTaggerState extends State<UserTagger> {
 
     for (int i = 0; i < splitText.length; i++) {
       final text = splitText[i];
-      final taggedText = _tagTrie.search(text);
+      final taggedText = _tagTrie.search(text, start);
 
       if (taggedText == null) {
         start = end + 1;
@@ -182,12 +182,6 @@ class _UserTaggerState extends State<UserTagger> {
     name = "@${name.trim()}";
     id = id.trim();
 
-    if (_taggedUsers[name] != null) {
-      //user has already been tagged
-      //show error
-      return;
-    }
-
     final text = controller.text;
     late final position = controller.selection.base.offset - 1;
     int index = 0;
@@ -197,23 +191,22 @@ class _UserTaggerState extends State<UserTagger> {
       index = text.lastIndexOf("@");
     }
     if (index >= 0) {
-      final tag = text.substring(index, position + 1);
       _defer = true;
 
       String newText;
 
       if (index - 1 > 0 && text[index - 1] != " ") {
-        newText = text.replaceAll(tag, " $name ");
+        newText = text.replaceRange(index, position + 1, " $name ");
+        index++;
       } else {
-        newText = text.replaceAll(tag, "$name ");
+        newText = text.replaceRange(index, position + 1, "$name ");
       }
 
       _lastCachedText = newText;
       controller.text = newText;
       _defer = true;
 
-      int offset = newText.indexOf(name) + name.length;
-      if (offset > newText.length) offset -= 1;
+      int offset = index + name.length;
 
       final taggedText = TaggedText(
         startIndex: offset - name.length,

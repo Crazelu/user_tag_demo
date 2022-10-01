@@ -3,12 +3,12 @@ import 'package:user_tag_demo/models/tagged_text.dart';
 class _TrieNode {
   final Map<String, _TrieNode> children;
   late bool endOfWord;
-  int? startIndex;
-  int? endIndex;
+  final Map<int, int> indices;
 
   _TrieNode({
     this.endOfWord = false,
-  }) : children = {};
+  })  : children = {},
+        indices = {};
 }
 
 class Trie {
@@ -37,13 +37,12 @@ class Trie {
       }
     }
     node.endOfWord = true;
-    node.startIndex = tag.startIndex;
-    node.endIndex = tag.endIndex;
+    node.indices.putIfAbsent(tag.startIndex, () => tag.endIndex);
   }
 
   ///If a [TaggedText] is a substring of [word],
   ///[TaggedText] is returned. Otherwise, `null` is returned.
-  TaggedText? search(String word) {
+  TaggedText? search(String word, int startIndex) {
     int length = word.length;
     _TrieNode node = _root;
     int lastIndex = 0;
@@ -52,11 +51,14 @@ class Trie {
 
     for (int i = 0; i < length; i++) {
       if (node.endOfWord) {
-        tag = TaggedText(
-          startIndex: node.startIndex!,
-          endIndex: node.endIndex!,
-          text: word.substring(0, lastIndex + 1),
-        );
+        final endIndex = node.indices[startIndex];
+        if (endIndex != null) {
+          tag = TaggedText(
+            startIndex: startIndex,
+            endIndex: endIndex,
+            text: word.substring(0, lastIndex + 1),
+          );
+        }
       }
 
       final char = word[i];
@@ -67,11 +69,14 @@ class Trie {
       node = node.children[char]!;
     }
     if (node.endOfWord) {
-      return TaggedText(
-        startIndex: node.startIndex!,
-        endIndex: node.endIndex!,
-        text: word.substring(0, lastIndex + 1),
-      );
+      final endIndex = node.indices[startIndex];
+      if (endIndex != null) {
+        tag = TaggedText(
+          startIndex: startIndex,
+          endIndex: endIndex,
+          text: word.substring(0, lastIndex + 1),
+        );
+      }
     }
     return tag;
   }
