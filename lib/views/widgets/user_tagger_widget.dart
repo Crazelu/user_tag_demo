@@ -5,6 +5,10 @@ import 'package:user_tag_demo/models/user.dart';
 import 'package:user_tag_demo/views/view_models/search_view_model.dart';
 import 'package:user_tag_demo/views/widgets/loading_indicator.dart';
 
+typedef UserTaggerWidgetBuilder = Widget Function(
+    BuildContext context, GlobalKey key);
+typedef TagTextFormatter = String Function(String id, String name);
+
 ///Search view model
 final _searchViewModel = SearchViewModel();
 
@@ -14,8 +18,15 @@ class UserTagger extends StatefulWidget {
     required this.controller,
     required this.onFormattedTextChanged,
     required this.builder,
+    this.tagController,
+    this.tagTextFormatter,
     this.onCreate,
   }) : super(key: key);
+
+  final TagTextFormatter? tagTextFormatter;
+
+  /// {@macro usertagger}
+  final UserTagController? tagController;
 
   ///Child TextField's controller
   final TextEditingController controller;
@@ -27,9 +38,10 @@ class UserTagger extends StatefulWidget {
   ///from parent widget.
   final void Function(VoidCallback)? onCreate;
 
-  ///Widget builder.
-  ///Returned widget must use the [GlobalKey] as it's key.
-  final Widget Function(BuildContext, GlobalKey) builder;
+  ///Overlay Widget builder.
+  ///Returned widget should have a Container as parent widget
+  ///with the [GlobalKey] as its key.
+  final UserTaggerWidgetBuilder builder;
 
   @override
   State<UserTagger> createState() => _UserTaggerState();
@@ -44,6 +56,11 @@ class _UserTaggerState extends State<UserTagger> {
   late double _width = 0;
   late bool _hideOverlay = true;
   OverlayEntry? _overlayEntry;
+
+  ///Formats tag text to include id
+  String _formatTagText(String id, String name) {
+    return widget.tagTextFormatter?.call(id, name) ?? "@$id#$name#";
+  }
 
   ///Retrieves rendering information necessary to determine where
   ///the overlay is positioned on the screen.
@@ -100,7 +117,9 @@ class _UserTaggerState extends State<UserTagger> {
   ///Table of tagged user names and their ids
   late final Map<TaggedText, String> _taggedUsers = {};
 
-  ///Formatted text where tagged user names are replaced in this format:
+  ///Formatted text where tagged user names are replaced with
+  ///the result of [TagTextFormatter] if it's not null.
+  ///Otherwise, tagged user names are replaced in this format:
   ///```dart
   ///"@Lucky Ebere"
   ///```
@@ -138,7 +157,9 @@ class _UserTaggerState extends State<UserTagger> {
       if (taggedText.startIndex == start) {
         String suffix = text.substring(taggedText.text.length);
         String formattedTagText = taggedText.text.replaceAll("@", "");
-        formattedTagText = "@${_taggedUsers[taggedText]}#$formattedTagText#";
+        formattedTagText =
+            _formatTagText(_taggedUsers[taggedText]!, formattedTagText);
+        // formattedTagText = "@${_taggedUsers[taggedText]}#$formattedTagText#";
         start = end + 1;
         if (i + 1 < splitText.length) {
           end = start + splitText[i + 1].length;
@@ -606,6 +627,14 @@ class _UserTaggerState extends State<UserTagger> {
   void initState() {
     super.initState();
     controller.addListener(_tagListener);
+    widget.tagController?._onClear(() {
+      _taggedUsers.clear();
+      _tagTrie.clear();
+      controller.clear();
+    });
+    widget.tagController?._onDismissOverlay(() {
+      _shouldHideOverlay(true);
+    });
   }
 
   @override
@@ -704,5 +733,47 @@ class _UserListView extends StatelessWidget {
             }),
       ),
     );
+  }
+}
+
+/// {@template usertagger}
+///Controller for [UserTagger].
+///This object exposes callback registration bindings to enable clearing
+///[UserTagger]'s tags, dismissing overlay and retrieving formatted text.
+/// {@endtemplate}
+class UserTagController {
+  Function? _clearCallback;
+  Function? _dismissOverlayCallback;
+  late String _text = "";
+
+  ///Formatted text from [UserTagger]
+  String get text => _text;
+
+  ///Clears [UserTagger] internal tagged users state
+  void clear() {
+    _clearCallback?.call();
+  }
+
+  ///Dismisses user list overlay
+  void dismissOverlay() {
+    _dismissOverlayCallback?.call();
+  }
+
+  ///Registers callback for clearing [UserTagger]'s
+  ///internal tagged users state.
+  void _onClear(Function callback) {
+    _clearCallback = callback;
+  }
+
+  ///Registers callback for dismissing [UserTagger]'s
+  ///user list overlay.
+  void _onDismissOverlay(Function callback) {
+    _dismissOverlayCallback = callback;
+  }
+
+  ///Registers callback for retrieving updated
+  ///formatted text from [UserTagger].
+  void _onTextChanged(String newText) {
+    _text = newText;
   }
 }
