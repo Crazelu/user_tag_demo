@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:user_tag_demo/models/tagged_text.dart';
 import 'package:user_tag_demo/models/user.dart';
 import 'package:user_tag_demo/views/view_models/search_view_model.dart';
 import 'package:user_tag_demo/views/widgets/loading_indicator.dart';
@@ -94,7 +95,7 @@ class _UserTaggerState extends State<UserTagger> {
   }
 
   ///Table of tagged user names and their ids
-  late final Map<String, String> _taggedUsers = {};
+  late final Map<TaggedText, String> _taggedUsers = {};
 
   ///Formatted text where tagged user names are replaced in this format:
   ///```dart
@@ -107,22 +108,77 @@ class _UserTaggerState extends State<UserTagger> {
   ///```
   ///assuming that `Lucky Ebere`'s id is `6zo22531b866ce0016f9e5tt`
   String get _formattedText {
-    String text = controller.text;
+    String controllerText = controller.text;
 
-    for (var name in _taggedUsers.keys) {
-      if (text.contains(name)) {
-        final userName = name.replaceAll("@", "");
-        text = text.replaceAll(name, "@${_taggedUsers[name]}#$userName#");
+    if (controllerText.isEmpty) return "";
+
+    final splitText = controllerText.split(" ");
+
+    List<TaggedText> tags = _taggedUsers.keys.toList();
+    List<String> result = [];
+    int start = 0;
+    int end = splitText.first.length;
+
+    for (int i = 0; i < splitText.length; i++) {
+      final text = splitText[i];
+      final index = tags.indexWhere((tag) => tag.text == text);
+      if (index < 0) {
+        start = end + 1;
+        if (i + 1 < splitText.length) {
+          end = start + splitText[i + 1].length;
+        }
+
+        result.add(text);
+        continue;
+      }
+
+      final taggedText = tags[index];
+
+      if (taggedText.startIndex == start) {
+        String newText = text.replaceAll("@", "");
+        newText = "@${_taggedUsers[taggedText]}#$newText#";
+        start = end + 1;
+        if (i + 1 < splitText.length) {
+          end = start + splitText[i + 1].length;
+        }
+        result.add(newText);
+      } else {
+        start = end + 1;
+        if (i + 1 < splitText.length) {
+          end = start + splitText[i + 1].length;
+        }
+        result.add(text);
       }
     }
-    return text;
+
+    final resultString = result.join(" ");
+    print(resultString);
+
+    // for (var tag in _taggedUsers.keys) {
+    //   if (text.contains(tag.text)) {
+    //     // final taggedUsername = text.substring(
+    //     //   tag.startIndex,
+    //     //   tag.endIndex,
+    //     // );
+    //     final userName = tag.text.replaceAll("@", "");
+    //     // text = text.replaceAll( name, "@${_taggedUsers[name]}#$userName#");
+    //     text = text.replaceRange(
+    //       tag.startIndex,
+    //       tag.endIndex,
+    //       "@${_taggedUsers[tag]}#$userName#",
+    //     );
+    //   }
+    // }
+
+    // print(text);
+    return resultString;
   }
 
   ///Whether to not execute the [_tagListener] logic
   bool _defer = false;
 
   ///Current tagged user selected in TextField
-  String _selectedTag = "";
+  TaggedText? _selectedTag;
 
   ///Executes user search with [query]
   void _search(String query) {
@@ -158,18 +214,26 @@ class _UserTaggerState extends State<UserTagger> {
     if (index >= 0) {
       final tag = text.substring(index, position + 1);
       _defer = true;
-      _taggedUsers[name] = id;
-      final newText = text.replaceAll(tag, name);
+
+      final newText = text.replaceAll(tag, "$name ");
       _lastCachedText = newText;
       controller.text = newText;
       _defer = true;
 
-      int offset = newText.indexOf(name) + name.length + 1;
+      int offset = newText.indexOf(name) + name.length;
       if (offset > newText.length) offset -= 1;
+
+      final taggedText = TaggedText(
+        startIndex: offset - name.length,
+        endIndex: offset,
+        text: name,
+      );
+      print(taggedText);
+      _taggedUsers[taggedText] = id;
 
       controller.selection = TextSelection.fromPosition(
         TextPosition(
-          offset: offset,
+          offset: offset + 1,
         ),
       );
 
@@ -192,6 +256,7 @@ class _UserTaggerState extends State<UserTagger> {
   bool _removeEditedTags() {
     try {
       final text = controller.text;
+      print("MADE IT HERE $text");
       if (text.isEmpty) {
         _taggedUsers.clear();
         _lastCachedText = text;
@@ -204,11 +269,14 @@ class _UserTaggerState extends State<UserTagger> {
       }
 
       for (var tag in _taggedUsers.keys) {
-        if (!text.contains(tag)) {
+        print("${tag.endIndex} - $position");
+        if (tag.endIndex - 1 == position + 1) {
           if (_isTagSelected) {
+            print("REMOVING");
             _removeSelection();
             return true;
           } else {
+            print("BACKTRACKING");
             if (_backtrackAndSelect(tag)) return true;
           }
         }
@@ -227,11 +295,15 @@ class _UserTaggerState extends State<UserTagger> {
   ///
   ///Returns `true` if a tagged user is found and selected.
   ///Otherwise, returns `false`.
-  bool _backtrackAndSelect(String tag) {
+  bool _backtrackAndSelect(TaggedText tag) {
     String text = controller.text;
     if (!text.contains("@")) return false;
 
     final length = controller.selection.base.offset;
+
+    if (tag.startIndex > length || tag.endIndex - 1 > length) {
+      return false;
+    }
     _defer = true;
     controller.text = _lastCachedText;
     text = _lastCachedText;
@@ -246,8 +318,15 @@ class _UserTaggerState extends State<UserTagger> {
       if (i == length && text[i] == "@") return false;
 
       temp = text[i] + temp;
-      if (text[i] == "@" && temp.length > 1 && temp == tag) {
-        _selectedTag = tag;
+      if (text[i] == "@" &&
+          temp.length > 1 &&
+          temp == tag.text &&
+          i == tag.startIndex) {
+        _selectedTag = TaggedText(
+          startIndex: i,
+          endIndex: length + 1,
+          text: tag.text,
+        );
         _isTagSelected = true;
         _startOffset = i;
         _endOffset = length + 1;
@@ -267,7 +346,7 @@ class _UserTaggerState extends State<UserTagger> {
   ///has been removed.
   void _removeSelection() {
     _taggedUsers.remove(_selectedTag);
-    _selectedTag = "";
+    _selectedTag = null;
     _lastCachedText = controller.text;
     _startOffset = null;
     _endOffset = null;
@@ -298,6 +377,9 @@ class _UserTaggerState extends State<UserTagger> {
   ///Regex to match allowed search characters.
   ///Non-conforming characters terminate the search context.
   late final _regExp = RegExp(r'^[a-zA-Z-]*$');
+
+  int _lastCursorPosition = 0;
+  bool _isBacktrackingToSearch = false;
 
   ///This is triggered when deleting text from TextField that isn't
   ///a tagged user. Useful for continuing search without having to
@@ -342,12 +424,14 @@ class _UserTaggerState extends State<UserTagger> {
       if (text[i] == "@" && temp.length > 1) {
         _shouldSearch = true;
         _isTagSelected = false;
+        _isBacktrackingToSearch = true;
         _extractAndSearch(controller.text, length);
         return false;
       }
     }
 
     _lastCachedText = controller.text;
+    _isBacktrackingToSearch = false;
     return true;
   }
 
@@ -363,6 +447,8 @@ class _UserTaggerState extends State<UserTagger> {
 
     final length = controller.selection.base.offset - 1;
 
+    print("LENGTH: $length");
+
     late String temp = "";
 
     for (int i = length; i >= 0; i--) {
@@ -375,29 +461,45 @@ class _UserTaggerState extends State<UserTagger> {
       if (text[i] == "@" && temp.length > 1) break;
     }
 
-    if (temp.isEmpty) return;
-    for (var user in _taggedUsers.keys) {
-      if (user.contains(temp)) {
-        final names = user.split(" ");
-        if (names.length != 2) return;
-
-        int offset = length +
-            names.last.length +
-            (names.first.length - temp.length + 1) +
-            1;
-
-        if (offset > text.length) {
-          offset = text.length;
-        }
-
-        if (text.substring(length + 1, offset).trim().contains(names.last)) {
-          _defer = true;
-          controller.selection = TextSelection.fromPosition(
-            TextPosition(offset: offset),
-          );
-          return;
-        }
+    if (temp.isEmpty || !temp.contains("@")) return;
+    for (var tag in _taggedUsers.keys) {
+      print("CURRENT CURSOR: $length");
+      print("TEMP: $temp -> TAG: ${tag.text}");
+      print("START INDEX: ${tag.startIndex} -> END INDEX: ${tag.endIndex}");
+      if (length + 1 > tag.startIndex &&
+          tag.startIndex <= length + 1 &&
+          length + 1 < tag.endIndex) {
+        print("YASS");
+        _defer = true;
+        controller.selection = TextSelection.fromPosition(
+          TextPosition(offset: tag.endIndex),
+        );
+        return;
       }
+      // if (tag.text.contains(temp)) {
+      //   print("CURRENT CURSOR: $length");
+      //   print("TEMP: $temp -> TAG: ${tag.text}");
+      //   print("START INDEX: ${tag.startIndex} -> END INDEX: ${tag.endIndex}");
+      //   final names = tag.text.split(" ");
+      //   if (names.length != 2) return;
+
+      //   int offset = length +
+      //       names.last.length +
+      //       (names.first.length - temp.length + 1) +
+      //       1;
+
+      //   if (offset > text.length) {
+      //     offset = text.length;
+      //   }
+
+      //   if (text.substring(length + 1, offset).trim().contains(names.last)) {
+      //     _defer = true;
+      //     controller.selection = TextSelection.fromPosition(
+      //       TextPosition(offset: offset),
+      //     );
+      //     return;
+      //   }
+      // }
     }
   }
 
@@ -411,6 +513,20 @@ class _UserTaggerState extends State<UserTagger> {
   ///Exits search context and hides overlay when a terminating character
   ///not matched by [_regExp] is entered.
   void _tagListener() {
+    print(controller.selection.base.offset);
+    final currentCursorPosition = controller.selection.base.offset;
+    if (_shouldSearch &&
+        _isBacktrackingToSearch &&
+        (_lastCursorPosition - 1 != currentCursorPosition ||
+            _lastCursorPosition + 1 != currentCursorPosition)) {
+      _shouldSearch = false;
+      _isBacktrackingToSearch = false;
+      _shouldHideOverlay(true);
+    }
+    // if (currentCursorPosition == _lastCursorPosition + 1) {
+    //   _shouldSearch = true;
+    // }
+    _lastCursorPosition = currentCursorPosition;
     if (_defer) {
       _defer = false;
       return;
@@ -418,7 +534,7 @@ class _UserTaggerState extends State<UserTagger> {
 
     final text = controller.text;
 
-    if (text.isEmpty && _selectedTag.isNotEmpty) {
+    if (text.isEmpty && _selectedTag != null) {
       _removeSelection();
     }
 
@@ -426,7 +542,7 @@ class _UserTaggerState extends State<UserTagger> {
     //reset tag selection values
     if (_startOffset != null &&
         controller.selection.base.offset != _startOffset) {
-      _selectedTag = "";
+      _selectedTag = null;
       _startOffset = null;
       _endOffset = null;
       _isTagSelected = false;
