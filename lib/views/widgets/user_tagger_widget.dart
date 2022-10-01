@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:user_tag_demo/models/tagged_text.dart';
+import 'package:user_tag_demo/models/trie.dart';
 import 'package:user_tag_demo/models/user.dart';
 import 'package:user_tag_demo/views/view_models/search_view_model.dart';
 import 'package:user_tag_demo/views/widgets/loading_indicator.dart';
@@ -94,6 +95,8 @@ class _UserTaggerState extends State<UserTagger> {
     );
   }
 
+  late final Trie _tagTrie = Trie();
+
   ///Table of tagged user names and their ids
   late final Map<TaggedText, String> _taggedUsers = {};
 
@@ -114,15 +117,15 @@ class _UserTaggerState extends State<UserTagger> {
 
     final splitText = controllerText.split(" ");
 
-    List<TaggedText> tags = _taggedUsers.keys.toList();
     List<String> result = [];
     int start = 0;
     int end = splitText.first.length;
 
     for (int i = 0; i < splitText.length; i++) {
       final text = splitText[i];
-      final index = tags.indexWhere((tag) => tag.text == text);
-      if (index < 0) {
+      final taggedText = _tagTrie.search(text);
+
+      if (taggedText == null) {
         start = end + 1;
         if (i + 1 < splitText.length) {
           end = start + splitText[i + 1].length;
@@ -132,16 +135,15 @@ class _UserTaggerState extends State<UserTagger> {
         continue;
       }
 
-      final taggedText = tags[index];
-
       if (taggedText.startIndex == start) {
-        String newText = text.replaceAll("@", "");
-        newText = "@${_taggedUsers[taggedText]}#$newText#";
+        String suffix = text.substring(taggedText.text.length);
+        String formattedTagText = taggedText.text.replaceAll("@", "");
+        formattedTagText = "@${_taggedUsers[taggedText]}#$formattedTagText#";
         start = end + 1;
         if (i + 1 < splitText.length) {
           end = start + splitText[i + 1].length;
         }
-        result.add(newText);
+        result.add(formattedTagText + suffix);
       } else {
         start = end + 1;
         if (i + 1 < splitText.length) {
@@ -154,23 +156,6 @@ class _UserTaggerState extends State<UserTagger> {
     final resultString = result.join(" ");
     print(resultString);
 
-    // for (var tag in _taggedUsers.keys) {
-    //   if (text.contains(tag.text)) {
-    //     // final taggedUsername = text.substring(
-    //     //   tag.startIndex,
-    //     //   tag.endIndex,
-    //     // );
-    //     final userName = tag.text.replaceAll("@", "");
-    //     // text = text.replaceAll( name, "@${_taggedUsers[name]}#$userName#");
-    //     text = text.replaceRange(
-    //       tag.startIndex,
-    //       tag.endIndex,
-    //       "@${_taggedUsers[tag]}#$userName#",
-    //     );
-    //   }
-    // }
-
-    // print(text);
     return resultString;
   }
 
@@ -215,7 +200,14 @@ class _UserTaggerState extends State<UserTagger> {
       final tag = text.substring(index, position + 1);
       _defer = true;
 
-      final newText = text.replaceAll(tag, "$name ");
+      String newText;
+
+      if (index - 1 > 0 && text[index - 1] != " ") {
+        newText = text.replaceAll(tag, " $name ");
+      } else {
+        newText = text.replaceAll(tag, "$name ");
+      }
+
       _lastCachedText = newText;
       controller.text = newText;
       _defer = true;
@@ -230,6 +222,7 @@ class _UserTaggerState extends State<UserTagger> {
       );
       print(taggedText);
       _taggedUsers[taggedText] = id;
+      _tagTrie.insert(taggedText);
 
       controller.selection = TextSelection.fromPosition(
         TextPosition(
@@ -257,8 +250,14 @@ class _UserTaggerState extends State<UserTagger> {
     try {
       final text = controller.text;
       print("MADE IT HERE $text");
+      if (_isTagSelected) {
+        print("REMOVING");
+        _removeSelection();
+        return true;
+      }
       if (text.isEmpty) {
         _taggedUsers.clear();
+        _tagTrie.clear();
         _lastCachedText = text;
         return false;
       }
@@ -271,11 +270,7 @@ class _UserTaggerState extends State<UserTagger> {
       for (var tag in _taggedUsers.keys) {
         print("${tag.endIndex} - $position");
         if (tag.endIndex - 1 == position + 1) {
-          if (_isTagSelected) {
-            print("REMOVING");
-            _removeSelection();
-            return true;
-          } else {
+          if (!_isTagSelected) {
             print("BACKTRACKING");
             if (_backtrackAndSelect(tag)) return true;
           }
@@ -346,6 +341,8 @@ class _UserTaggerState extends State<UserTagger> {
   ///has been removed.
   void _removeSelection() {
     _taggedUsers.remove(_selectedTag);
+    _tagTrie.clear();
+    _tagTrie.insertAll(_taggedUsers.keys);
     _selectedTag = null;
     _lastCachedText = controller.text;
     _startOffset = null;

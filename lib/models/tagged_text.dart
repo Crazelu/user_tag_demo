@@ -17,4 +17,9 @@ class TaggedText extends Equatable {
         endIndex,
         text,
       ];
+
+  @override
+  String toString() {
+    return "TaggedText(startIndex: $startIndex, endIndex: $endIndex, text: $text)";
+  }
 }
